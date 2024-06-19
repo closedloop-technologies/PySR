@@ -145,8 +145,8 @@ def _check_assertions(
     y_units,
 ):
     # Check for potential errors before they happen
-    assert len(X.shape) == 2
-    assert len(y.shape) in [1, 2]
+    assert len(X.shape) >= 2
+    assert len(y.shape) >= 1
     assert X.shape[0] == y.shape[0]
     if weights is not None:
         assert weights.shape == y.shape
@@ -1488,7 +1488,8 @@ class PySRRegressor(MultiOutputMixin, RegressorMixin, BaseEstimator):
         elif len(y.shape) == 2:
             self.nout_ = y.shape[1]
         else:
-            raise NotImplementedError("y shape not supported!")
+            self.nout_ = y.shape[1]
+            self.nout_dims_ = y.shape[2:]
 
         self.complexity_of_variables_ = copy.deepcopy(complexity_of_variables)
         self.X_units_ = copy.deepcopy(X_units)
@@ -1506,7 +1507,17 @@ class PySRRegressor(MultiOutputMixin, RegressorMixin, BaseEstimator):
         )
 
     def _validate_data_X_y(self, X, y) -> Tuple[ndarray, ndarray]:
-        raw_out = self._validate_data(X=X, y=y, reset=True, multi_output=True)  # type: ignore
+        if len(X.shape) >= 3 and len(y.shape) >=3:
+            
+            self.n_features_in_ = X.shape[1]
+            raw_out = (X, y)
+        elif len(X.shape) >= 3 or len(y.shape) >=3:
+            # TODO implement this, might require setting 'no_validation' to True for each variable
+            raise NotImplementedError(
+                "PySRRegressor does not currently support multi-dimensional input data."
+            )
+        else:
+            raw_out = self._validate_data(X=X, y=y, reset=True, multi_output=True)  # type: ignore
         return cast(Tuple[ndarray, ndarray], raw_out)
 
     def _validate_data_X(self, X) -> Tuple[ndarray]:
@@ -1853,11 +1864,17 @@ class PySRRegressor(MultiOutputMixin, RegressorMixin, BaseEstimator):
             np_dtype = {32: np.complex64, 64: np.complex128}[self.precision]
 
         # This converts the data into a Julia array:
-        jl_X = jl_array(np.array(X, dtype=np_dtype).T)
+        if len(y.shape) <= 2:        
+            jl_X = jl_array(np.array(X, dtype=np_dtype).T)
+        else:
+            jl_X = jl_array(np.array(X, dtype=np_dtype).swapaxes(1, 0))
+
         if len(y.shape) == 1:
             jl_y = jl_array(np.array(y, dtype=np_dtype))
-        else:
+        elif len(y.shape) == 2:
             jl_y = jl_array(np.array(y, dtype=np_dtype).T)
+        else:
+            jl_y = jl_array(np.array(y, dtype=np_dtype).swapaxes(1,0))
         if weights is not None:
             if len(weights.shape) == 1:
                 jl_weights = jl_array(np.array(weights, dtype=np_dtype))
@@ -1994,6 +2011,7 @@ class PySRRegressor(MultiOutputMixin, RegressorMixin, BaseEstimator):
 
             self.equations_ = None
             self.nout_ = 1
+            self.nout_dims_ = (1,)
             self.selection_mask_ = None
             self.julia_state_stream_ = None
             self.julia_options_stream_ = None
